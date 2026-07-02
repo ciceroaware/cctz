@@ -218,6 +218,14 @@ WinTimeZoneRegistryInfo LoadWinTimeZoneRegistry(const std::string& name) {
     if (first_year > last_year) {
       return {};
     }
+    // Require the same year range as SYSTEMTIME (see ToWinSystemTime).
+    // This also bounds the year range that the transition-table builder
+    // expands entry-per-year, so corrupt or malicious registry data (e.g.
+    // FirstEntry == LastEntry == 4000000000) cannot make it loop over an
+    // absurd number of years.
+    if (first_year < 1601 || last_year > 30827) {
+      return {};
+    }
 
     const size_t year_count = static_cast<size_t>(last_year - first_year + 1);
     timezone_list.reserve(year_count);
