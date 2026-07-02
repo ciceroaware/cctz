@@ -143,6 +143,10 @@ class TransitionTableBuilder {
     } else {
       const year_t last_year =
           info.first_year + static_cast<year_t>(info.entries.size());
+      // At most three transitions per year (year begin plus the two rule
+      // dates), plus the initial transition.
+      transitions_.reserve(
+          static_cast<std::size_t>(last_year - first_year) * 3 + 1);
       for (cctz::year_t year = first_year; year < last_year; ++year) {
         ProcessEntry(
             info.entries[year < info.first_year
