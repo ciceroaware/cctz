@@ -110,7 +110,7 @@ struct WinTimeZoneRegistryInfo {
   year_t first_year;
 };
 
-// MakeTimeZoneFromWinRegistry does not validate the entries in
+// CreateWinZoneInfoSource does not validate the entries in
 // WinTimeZoneRegistryInfo (e.g. invalid date entries).
 // In production, LoadWinTimeZoneRegistry() takes care of runtime data
 // validations.
