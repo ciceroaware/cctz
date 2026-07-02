@@ -2397,6 +2397,51 @@ TEST(CreateWinZoneInfoSource, FixedOffset_HalfHourEast) {
              false);
 }
 
+// Entries with only one of StandardDate/DaylightDate set.  Windows requires
+// both dates for a zone that observes DST, so such entries never observe
+// DST and must behave as UTC+1 year-round (and must not emit a TZ string
+// with a DST offset but fewer than two rule dates, which would be
+// unparseable and make the zone fail to load).
+const WinTimeZoneRegistryInfo kLoneDaylightDateZone(
+    {
+        {-60, 0, -60, {0, 0, 0, 0, 0, 0, 0, 0}, {0, 3, 0, 5, 2, 0, 0, 0}},
+    },
+    0);
+
+const WinTimeZoneRegistryInfo kLoneStandardDateZone(
+    {
+        {-60, 0, -60, {0, 10, 0, 5, 3, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}},
+    },
+    0);
+
+TEST(ToTzString, LoneTransitionDate) {
+  EXPECT_EQ("<UTC+01>-1", ToTzString(kLoneDaylightDateZone.entries.back()));
+  EXPECT_EQ("<UTC+01>-1", ToTzString(kLoneStandardDateZone.entries.back()));
+}
+
+TEST(CreateWinZoneInfoSource, LoneTransitionDate) {
+  {
+    const auto source = CreateWinZoneInfoSource(kLoneDaylightDateZone);
+    ASSERT_TRUE(!!source);
+    auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+    ASSERT_TRUE(!!tz);
+    ExpectTime(FromUTC(2024, 1, 15, 0, 0, 0), tz, 2024, 1, 15, 1, 0, 0,
+               3600, false);
+    ExpectTime(FromUTC(2024, 6, 15, 0, 0, 0), tz, 2024, 6, 15, 1, 0, 0,
+               3600, false);
+  }
+  {
+    const auto source = CreateWinZoneInfoSource(kLoneStandardDateZone);
+    ASSERT_TRUE(!!source);
+    auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+    ASSERT_TRUE(!!tz);
+    ExpectTime(FromUTC(2024, 1, 15, 0, 0, 0), tz, 2024, 1, 15, 1, 0, 0,
+               3600, false);
+    ExpectTime(FromUTC(2024, 6, 15, 0, 0, 0), tz, 2024, 6, 15, 1, 0, 0,
+               3600, false);
+  }
+}
+
 // ============================================================
 // DST zones with recurring (day-of-week) rules
 // ============================================================

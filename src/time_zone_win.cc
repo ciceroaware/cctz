@@ -106,11 +106,20 @@ class TransitionTableBuilder {
             : std::min<cctz::year_t>(info.first_year, kTransitionStartYear);
 
     const auto& first_entry = info.entries[0];
-    if (IsFixedTimeZone(first_entry)) {
-      // Add initial fixed-offset transition and seed last_offset_.
+    const bool first_entry_supports_dst =
+        first_entry.standard_date.month != 0 &&
+        first_entry.daylight_date.month != 0;
+    if (!first_entry_supports_dst) {
+      // The first entry never transitions (ProcessEntry ignores lone
+      // transition dates), so add an initial transition here and seed
+      // last_offset_.  For fixed-offset zones (no transition dates at all),
+      // the Win32 API ignores StandardBias and uses only Bias.
       civil_second first_civil_second(first_year, 1, 1, 0, 0, 0);
       TransitionInfo initial_info;
-      const std::int_fast32_t offset_seconds = -60 * first_entry.bias;
+      const std::int_fast32_t offset_seconds =
+          -60 * (IsFixedTimeZone(first_entry)
+                     ? first_entry.bias
+                     : (first_entry.bias + first_entry.standard_bias));
       initial_info.time =
           seconds(first_civil_second - offset_seconds -
                   civil_second(1970, 1, 1, 0, 0, 0))
@@ -189,14 +198,19 @@ class TransitionTableBuilder {
   void ProcessEntry(const WinTimeZoneRegistryEntry& format, year_t year) {
     const civil_second year_begin(year, 1, 1, 0, 0, 0);
 
+    // Windows requires both StandardDate and DaylightDate to be set for a
+    // zone that observes DST; if either is absent the entry never observes
+    // DST, so ignore a lone transition date.  (ToTzStringImpl applies the
+    // same rule when generating the proleptic TZ string.)
+    const bool supports_dst =
+        format.standard_date.month != 0 && format.daylight_date.month != 0;
+
     bool has_std_begin = false;
     civil_second std_begin;
-    if (format.standard_date.month != 0) {
-      has_std_begin = ResolveSystemTime(format.standard_date, year, &std_begin);
-    }
     bool has_dst_begin = false;
     civil_second dst_begin;
-    if (format.daylight_date.month != 0) {
+    if (supports_dst) {
+      has_std_begin = ResolveSystemTime(format.standard_date, year, &std_begin);
       has_dst_begin = ResolveSystemTime(format.daylight_date, year, &dst_begin);
     }
 
@@ -586,6 +600,15 @@ std::string ToTzStringImpl(const WinTimeZoneRegistryEntry& entry) {
     // same rule, and the TZ string must agree with the table's last
     // transition or TimeZoneInfo::Load() rejects the whole zone.
     return ToTzAbbrAndOffset(cctz::seconds(60 * entry.bias));
+  }
+  if (entry.standard_date.month == 0 || entry.daylight_date.month == 0) {
+    // Windows requires both StandardDate and DaylightDate for a zone that
+    // observes DST; with only one date the entry never observes DST
+    // (TransitionTableBuilder::ProcessEntry applies the same rule).
+    // Emitting the DST offset with a single rule date would produce an
+    // unparseable TZ string and the zone would fail to load.
+    return ToTzAbbrAndOffset(
+        cctz::seconds(60 * (entry.bias + entry.standard_bias)));
   }
   const std::string std_tz =
       ToTzAbbrAndOffset(cctz::seconds(60 * (entry.bias + entry.standard_bias)));
