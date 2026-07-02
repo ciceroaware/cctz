@@ -387,11 +387,10 @@ class WinZoneInfoSource : public ZoneInfoSource {
   }
 
   int Skip(std::size_t offset) override {
-    const std::size_t new_pos = pos_ + offset;
-    if (new_pos > data_.size()) {
-      return -1;  // Would go past EOF
+    if (offset > data_.size() - pos_) {
+      return -1;  // Would go past EOF (also guards against overflow).
     }
-    pos_ = new_pos;
+    pos_ += offset;
     return 0;
   }
 
