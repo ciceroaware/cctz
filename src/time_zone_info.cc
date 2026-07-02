@@ -451,9 +451,11 @@ std::unique_ptr<ZoneInfoSource> FileZoneInfoSource::Open(
   std::string path;
   if (pos == name.size() || name[pos] != '/') {
     const std::string tzdir = GetEnv("TZDIR");
-#if defined(_WIN32)
-    // On Windows, eagerly fallback to the ICU implementation when TZDIR is not
-    // set.
+#if defined(_WIN32) && defined(CCTZ_USE_WIN_REGISTRY_FALLBACK)
+    // On Windows, skip probing the default zoneinfo directory when TZDIR is
+    // not set so that the Windows registry fallback is used instead.  When
+    // the fallback is not compiled in, keep the historical behavior of
+    // trying "/usr/share/zoneinfo" (resolved against the current drive).
     if (tzdir.empty()) return nullptr;
 #endif
     path += tzdir.empty() ? "/usr/share/zoneinfo" : tzdir;
