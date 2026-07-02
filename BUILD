@@ -171,6 +171,7 @@ cc_test(
         "src/time_zone_win_test.cc",
         "src/time_zone_if.h",
         "src/time_zone_info.h",
+        "src/time_zone_win.h",
         "src/tzfile.h",
     ],
     deps = [
