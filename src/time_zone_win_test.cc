@@ -2215,6 +2215,15 @@ TEST(ToTzString, Australia_Adelaide) {
         ToTzString(kCentralAustraliaStandardTime.entries.back()));
 }
 
+// Windows encodes "midnight at the end of day D" as D 23:59:59.999; the
+// POSIX equivalent is D at 24:00:00 (the day after the Nth weekday is not
+// expressible as a fixed week/weekday pair).
+TEST(ToTzString, Asia_Hebron_EndOfDayRule) {
+    EXPECT_EQ(
+        "<UTC+02>-2<UTC+03>-3,M3.5.4/24:00:00,M10.4.4/24:00:00",
+        ToTzString(kWestBankStandardTime.entries[2]));
+}
+
 // https://github.com/dotnet/runtime/issues/118915
 TEST(CreateWinZoneInfoSource, Europe_Volgograd) {
     const auto source = CreateWinZoneInfoSource(kVolgogradStandardTime);
@@ -2556,6 +2565,42 @@ TEST(CreateWinZoneInfoSource, DST_Australia_Adelaide_YearBoundary) {
              34200, false);
   ExpectTime(FromUTC(2008, 10, 4, 16, 30, 0), tz, 2008, 10, 5, 3, 0, 0,
              37800, true);
+}
+
+// A zone whose proleptic rule uses Windows' "23:59:59.999" end-of-day
+// convention (as the real West Bank entries did in 2018-2019): DST begins
+// at midnight following the last Thursday of March.  In 2022 the last
+// Thursday of March is Mar 31, so DST begins Apr 1 — a fixed week/weekday
+// rule such as "last Friday of March" (Mar 25) would be a week early.
+const WinTimeZoneRegistryInfo kEndOfDayRuleZone(
+    {
+        {-120,
+         0,
+         -60,
+         {0, 10, 6, 5, 1, 0, 0, 0},
+         {0, 3, 4, 5, 23, 59, 59, 999}},
+    },
+    0);
+
+TEST(CreateWinZoneInfoSource, DST_EndOfDayRule_ProlepticYear) {
+  const auto source = CreateWinZoneInfoSource(kEndOfDayRuleZone);
+  ASSERT_TRUE(!!source);
+  auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+  ASSERT_TRUE(!!tz);
+
+  // Just before DST begins: Mar 31, 2022 23:59 local (UTC+2) = 21:59 UTC.
+  ExpectTime(FromUTC(2022, 3, 31, 21, 59, 0), tz, 2022, 3, 31, 23, 59, 0,
+             7200, false);
+  // Just after DST begins: Apr 1, 2022 01:00 local (UTC+3) = Mar 31 22:00
+  // UTC.  Clocks spring 00:00 → 01:00.
+  ExpectTime(FromUTC(2022, 3, 31, 22, 0, 0), tz, 2022, 4, 1, 1, 0, 0,
+             10800, true);
+
+  // Fall-back: Oct 29, 2022 01:00 local DST (UTC+3) = Oct 28 22:00 UTC.
+  ExpectTime(FromUTC(2022, 10, 28, 21, 59, 0), tz, 2022, 10, 29, 0, 59, 0,
+             10800, true);
+  ExpectTime(FromUTC(2022, 10, 28, 22, 0, 0), tz, 2022, 10, 29, 0, 0, 0,
+             7200, false);
 }
 
 // ============================================================

@@ -523,23 +523,6 @@ std::string ToTzAbbrAndOffset(cctz::seconds offset) {
          (offset_min == 0 ? "" : ":" + std::to_string(offset_min));
 }
 
-WinSystemTime AdjustWinSystemTime(const WinSystemTime& system_time) {
-  // Special rule for "23:59:59.999".
-  // https://stackoverflow.com/a/47106207
-  if (system_time.hour == 23 && system_time.minute == 59 &&
-      system_time.second == 59 && system_time.milliseconds == 999) {
-    const auto new_day_of_week = (system_time.day_of_week + 1) % 7;
-    if (new_day_of_week > system_time.day_of_week) {
-      const auto new_day = std::min(5, system_time.day + 1);
-      return WinSystemTime(system_time.year, system_time.month, new_day_of_week,
-                           new_day, 0, 0, 0, 0);
-    }
-    return WinSystemTime(system_time.year, system_time.month, new_day_of_week,
-                         system_time.day, 0, 0, 0, 0);
-  }
-  return system_time;
-}
-
 void Format02d(std::string* str, std::uint_fast8_t v) {
   str->push_back('0' + ((v / 10) % 10));
   str->push_back('0' + (v % 10));
@@ -553,26 +536,39 @@ void Format01d(std::string* str, std::uint_fast8_t v) {
 }
 
 std::string ToTzTransitionDateTimeStr(const WinSystemTime& datetime) {
-  const auto adjusted_datetime = AdjustWinSystemTime(datetime);
-  if (adjusted_datetime.month == 0) {
+  if (datetime.month == 0) {
     return "";
   }
+
+  // Windows uses "23:59:59.999" to represent a transition at midnight at the
+  // end of the rule's day (https://stackoverflow.com/a/47106207).  The day
+  // after "the Nth weekday W" is not expressible as a fixed week/weekday
+  // pair (which occurrence of W+1 it is depends on the month's layout in
+  // each year), but POSIX TZ strings accept transition times beyond
+  // 24:00:00, so emit the rule's own day with a time of 24:00:00.
+  const bool end_of_day =
+      datetime.hour == 23 && datetime.minute == 59 && datetime.second == 59 &&
+      datetime.milliseconds == 999;
 
   std::string result;
   result.reserve(sizeof(",Mmm.dd.ww.hh.mm.ss"));
 
   result.append(",M");
-  Format01d(&result, adjusted_datetime.month);
+  Format01d(&result, datetime.month);
   result.push_back('.');
-  Format01d(&result, adjusted_datetime.day);
+  Format01d(&result, datetime.day);
   result.push_back('.');
-  Format01d(&result, adjusted_datetime.day_of_week);
+  Format01d(&result, datetime.day_of_week);
   result.push_back('/');
-  Format01d(&result, adjusted_datetime.hour);
-  result.push_back(':');
-  Format02d(&result, adjusted_datetime.minute);
-  result.push_back(':');
-  Format02d(&result, adjusted_datetime.second);
+  if (end_of_day) {
+    result.append("24:00:00");
+  } else {
+    Format01d(&result, datetime.hour);
+    result.push_back(':');
+    Format02d(&result, datetime.minute);
+    result.push_back(':');
+    Format02d(&result, datetime.second);
+  }
 
   return result;
 }
