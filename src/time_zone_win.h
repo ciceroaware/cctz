@@ -51,14 +51,14 @@ struct WinSystemTime {
         second(second_),
         milliseconds(milliseconds_) {}
 
-  const std::uint_fast16_t year;
-  const std::uint_fast8_t month;
-  const std::uint_fast8_t day_of_week;
-  const std::uint_fast8_t day;
-  const std::uint_fast8_t hour;
-  const std::uint_fast8_t minute;
-  const std::uint_fast8_t second;
-  const std::uint_fast16_t milliseconds;
+  std::uint_fast16_t year;
+  std::uint_fast8_t month;
+  std::uint_fast8_t day_of_week;
+  std::uint_fast8_t day;
+  std::uint_fast8_t hour;
+  std::uint_fast8_t minute;
+  std::uint_fast8_t second;
+  std::uint_fast16_t milliseconds;
 };
 
 // A platform-independent redefinition of Windows' REG_TZI_FORMAT structure.
@@ -82,15 +82,15 @@ struct WinTimeZoneRegistryEntry {
         daylight_date(daylight_date_) {}
 
   // Base offset in minutes, where UTC == local time + bias.
-  const std::int_fast32_t bias;
+  std::int_fast32_t bias;
   // Additional offset in minutes applied to standard time.
-  const std::int_fast32_t standard_bias;
+  std::int_fast32_t standard_bias;
   // Additional offset in minutes applied to DST.
-  const std::int_fast32_t daylight_bias;
+  std::int_fast32_t daylight_bias;
   // Local time (in the previous offset) when the standard time begins.
-  const WinSystemTime standard_date;
+  WinSystemTime standard_date;
   // Local time (in the previous offset) when the DST begins.
-  const WinSystemTime daylight_date;
+  WinSystemTime daylight_date;
 };
 
 // A platform-independent data snapshot of Windows Registry Time Zone entries.
