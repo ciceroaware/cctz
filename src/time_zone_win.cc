@@ -202,13 +202,27 @@ class TransitionTableBuilder {
 
     if ((!has_std_begin || std_begin != year_begin) &&
         (!has_dst_begin || dst_begin != year_begin)) {
-      // For fixed-offset zones (no transition dates), the Win32 API ignores
-      // StandardBias and uses only Bias.  For DST zones, the standard-time
-      // offset is -(Bias + StandardBias).
-      const std::int_fast32_t year_begin_bias =
-          IsFixedTimeZone(format) ? format.bias
-                                  : (format.bias + format.standard_bias);
-      TryAddOffset(year_begin, OffsetDstPair{-60 * year_begin_bias, false});
+      // Windows treats a local time as DST when
+      //   DaylightDate <= t < StandardDate   (if DaylightDate < StandardDate)
+      //   t >= DaylightDate || t < StandardDate  (otherwise, i.e. when DST
+      //                                           wraps the year end as in the
+      //                                           southern hemisphere)
+      // so Jan 1 falls in DST iff the standard transition both exists and
+      // precedes the daylight one within the year.
+      const bool year_begins_in_dst =
+          has_std_begin && has_dst_begin && std_begin < dst_begin;
+      if (year_begins_in_dst) {
+        TryAddOffset(year_begin, OffsetDstPair{
+            -60 * (format.bias + format.daylight_bias), true});
+      } else {
+        // For fixed-offset zones (no transition dates), the Win32 API ignores
+        // StandardBias and uses only Bias.  For DST zones, the standard-time
+        // offset is -(Bias + StandardBias).
+        const std::int_fast32_t year_begin_bias =
+            IsFixedTimeZone(format) ? format.bias
+                                    : (format.bias + format.standard_bias);
+        TryAddOffset(year_begin, OffsetDstPair{-60 * year_begin_bias, false});
+      }
     }
 
     if (has_dst_begin) {

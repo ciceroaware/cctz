@@ -2501,6 +2501,63 @@ TEST(CreateWinZoneInfoSource, MakeTime_Australia_LordHowe) {
                  FromUTC(2024, 4, 6, 15, 0, 0));
 }
 
+// Australia/Adelaide — UTC+9:30/UTC+10:30 (Cen. Australia Standard Time).
+// Southern hemisphere: DST spans the year end, so Jan 1 falls in DST.
+// Dynamic DST 2007-2008, so years up to 2009 come from the transition
+// table (not the proleptic TZ string) — a regression test that the
+// builder does not force standard time at each year begin.
+//
+// 2007 (entry[0]): std = Mar/last-Sun/03:00, dst = Oct/last-Sun/02:00
+//   Fall   = Mar 25, 2007 03:00 ACDT (UTC Mar 24 16:30)
+// 2008 (entry[1]): std = Apr/1st-Sun/03:00, dst = Oct/1st-Sun/02:00
+//   Fall   = Apr  6, 2008 03:00 ACDT (UTC Apr  5 16:30)
+//   Spring = Oct  5, 2008 02:00 ACST (UTC Oct  4 16:30)
+TEST(CreateWinZoneInfoSource, DST_Australia_Adelaide_YearBoundary) {
+  const auto source = CreateWinZoneInfoSource(kCentralAustraliaStandardTime);
+  ASSERT_TRUE(!!source);
+  auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+  ASSERT_TRUE(!!tz);
+
+  // standard offset = -60 * (-570+0)  = 34200 s = UTC+9:30
+  // DST     offset = -60 * (-570-60) = 37800 s = UTC+10:30
+
+  // Extrapolated year (before first_year): mid-January is DST.
+  ExpectTime(FromUTC(1971, 1, 14, 13, 30, 0), tz, 1971, 1, 15, 0, 0, 0,
+             37800, true);
+
+  // 2006/2007 year boundary: DST continues across Jan 1.
+  ExpectTime(FromUTC(2006, 12, 31, 13, 29, 0), tz, 2006, 12, 31, 23, 59, 0,
+             37800, true);
+  ExpectTime(FromUTC(2006, 12, 31, 13, 30, 0), tz, 2007, 1, 1, 0, 0, 0,
+             37800, true);
+
+  // Fall-back Mar 25, 2007 03:00 ACDT → 02:00 ACST.
+  ExpectTime(FromUTC(2007, 3, 24, 16, 29, 0), tz, 2007, 3, 25, 2, 59, 0,
+             37800, true);
+  ExpectTime(FromUTC(2007, 3, 24, 16, 30, 0), tz, 2007, 3, 25, 2, 0, 0,
+             34200, false);
+
+  // 2007/2008 year boundary: DST continues across Jan 1.
+  ExpectTime(FromUTC(2007, 12, 31, 13, 29, 0), tz, 2007, 12, 31, 23, 59, 0,
+             37800, true);
+  ExpectTime(FromUTC(2007, 12, 31, 13, 30, 0), tz, 2008, 1, 1, 0, 0, 0,
+             37800, true);
+  ExpectTime(FromUTC(2008, 1, 14, 13, 30, 0), tz, 2008, 1, 15, 0, 0, 0,
+             37800, true);
+
+  // Fall-back Apr 6, 2008 03:00 ACDT → 02:00 ACST.
+  ExpectTime(FromUTC(2008, 4, 5, 16, 29, 0), tz, 2008, 4, 6, 2, 59, 0,
+             37800, true);
+  ExpectTime(FromUTC(2008, 4, 5, 16, 30, 0), tz, 2008, 4, 6, 2, 0, 0,
+             34200, false);
+
+  // Spring-forward Oct 5, 2008 02:00 ACST → 03:00 ACDT.
+  ExpectTime(FromUTC(2008, 10, 4, 16, 29, 0), tz, 2008, 10, 5, 1, 59, 0,
+             34200, false);
+  ExpectTime(FromUTC(2008, 10, 4, 16, 30, 0), tz, 2008, 10, 5, 3, 0, 0,
+             37800, true);
+}
+
 // ============================================================
 // Dynamic DST — year-boundary transitions
 // ============================================================
