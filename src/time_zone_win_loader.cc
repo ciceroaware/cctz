@@ -21,6 +21,7 @@
 #endif  // !defined(NOMINMAX)
 #include <windows.h>
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>

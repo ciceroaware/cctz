@@ -17,9 +17,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
-#include <cstring>
 #include <utility>
 #include <vector>
 
