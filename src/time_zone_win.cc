@@ -517,9 +517,14 @@ std::string ToTzAbbrAndOffset(cctz::seconds offset) {
   if (offset_count == 0) {
     return "UTC0";
   }
-  const auto offset_min = std::abs((offset_count % 3600) / 60);
+  // Emit the sign separately: dividing offset_count by 3600 would drop the
+  // sign for offsets within the first hour east of UTC (e.g. -1800 seconds
+  // must render as "-0:30", not "0:30").
+  const auto abs_count = std::abs(offset_count);
+  const auto offset_hour = abs_count / 3600;
+  const auto offset_min = (abs_count % 3600) / 60;
   return "<UTC" + cctz::FixedOffsetToAbbr(cctz::seconds(-offset_count)) + ">" +
-         std::to_string(offset_count / 3600) +
+         (offset_count < 0 ? "-" : "") + std::to_string(offset_hour) +
          (offset_min == 0 ? "" : ":" + std::to_string(offset_min));
 }
 

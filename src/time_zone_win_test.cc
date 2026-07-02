@@ -2371,6 +2371,32 @@ TEST(CreateWinZoneInfoSource, FixedOffset_NonZeroStandardBias) {
              false);
 }
 
+// A fixed-offset zone 30 minutes east of UTC (bias=-30).  POSIX offsets
+// within the first hour east of UTC need an explicit "-0" hour ("-0:30");
+// truncating integer division would drop the sign and flip the zone to
+// UTC-00:30.  No stock Windows zone has such an offset, but custom entries
+// may.
+const WinTimeZoneRegistryInfo kFixedZoneHalfHourEast(
+    {
+        {-30, 0, -60, {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}},
+    },
+    0);
+
+TEST(ToTzString, FixedOffsetHalfHourEast) {
+  EXPECT_EQ("<UTC+0030>-0:30",
+            ToTzString(kFixedZoneHalfHourEast.entries.back()));
+}
+
+TEST(CreateWinZoneInfoSource, FixedOffset_HalfHourEast) {
+  const auto source = CreateWinZoneInfoSource(kFixedZoneHalfHourEast);
+  ASSERT_TRUE(!!source);
+  auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+  ASSERT_TRUE(!!tz);
+
+  ExpectTime(FromUTC(2024, 1, 1, 0, 0, 0), tz, 2024, 1, 1, 0, 30, 0, 1800,
+             false);
+}
+
 // ============================================================
 // DST zones with recurring (day-of-week) rules
 // ============================================================
