@@ -231,8 +231,12 @@ std::wstring ConvertToWindowsTimeZoneId(const std::wstring& iana_name) {
       static_cast<std::int32_t>(iana_name.size());
 
   std::wstring result;
-  std::size_t len = std::max<std::size_t>(
-      std::min<size_t>(result.capacity(), std::numeric_limits<int>::max()), 1);
+  // Windows time zone IDs fit in DYNAMIC_TIME_ZONE_INFORMATION's 128-char
+  // TimeZoneKeyName, so the first call virtually always succeeds.  Seeding
+  // from result.capacity() (the SSO capacity, 7 chars on MSVC) would instead
+  // guarantee a U_BUFFER_OVERFLOW_ERROR round trip for any real ID such as
+  // "Tokyo Standard Time".
+  std::size_t len = 128;
   for (;;) {
     UErrorCode status = U_ZERO_ERROR;
     result.resize(len);
