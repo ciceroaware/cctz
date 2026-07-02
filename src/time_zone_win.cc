@@ -575,11 +575,15 @@ std::string ToTzTransitionDateTimeStr(const WinSystemTime& datetime) {
 
 // Construct TZ String Extensions
 std::string ToTzStringImpl(const WinTimeZoneRegistryEntry& entry) {
+  if (entry.standard_date.month == 0 && entry.daylight_date.month == 0) {
+    // For fixed-offset zones (no transition dates), the Win32 API ignores
+    // StandardBias and uses only Bias.  The transition table follows the
+    // same rule, and the TZ string must agree with the table's last
+    // transition or TimeZoneInfo::Load() rejects the whole zone.
+    return ToTzAbbrAndOffset(cctz::seconds(60 * entry.bias));
+  }
   const std::string std_tz =
       ToTzAbbrAndOffset(cctz::seconds(60 * (entry.bias + entry.standard_bias)));
-  if (entry.standard_date.month == 0 && entry.daylight_date.month == 0) {
-    return std_tz;
-  }
   const std::string dst_tz =
       ToTzAbbrAndOffset(cctz::seconds(60 * (entry.bias + entry.daylight_bias)));
   const std::string dst_start = ToTzTransitionDateTimeStr(entry.daylight_date);

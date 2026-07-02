@@ -2346,6 +2346,31 @@ TEST(CreateWinZoneInfoSource, FixedOffset_Hawaii) {
              -36000, false);
 }
 
+// A fixed-offset zone with a nonzero StandardBias.  The Win32 API ignores
+// StandardBias when there are no transition dates, so the offset is
+// -Bias = UTC+9.  The proleptic TZ string must use the same rule as the
+// transition table or TimeZoneInfo::Load() rejects the whole zone.
+const WinTimeZoneRegistryInfo kFixedZoneWithStandardBias(
+    {
+        {-540, -60, -60, {0, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}},
+    },
+    0);
+
+TEST(ToTzString, FixedOffsetIgnoresStandardBias) {
+  EXPECT_EQ("<UTC+09>-9",
+            ToTzString(kFixedZoneWithStandardBias.entries.back()));
+}
+
+TEST(CreateWinZoneInfoSource, FixedOffset_NonZeroStandardBias) {
+  const auto source = CreateWinZoneInfoSource(kFixedZoneWithStandardBias);
+  ASSERT_TRUE(!!source);
+  auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+  ASSERT_TRUE(!!tz);
+
+  ExpectTime(FromUTC(2024, 1, 1, 0, 0, 0), tz, 2024, 1, 1, 9, 0, 0, 32400,
+             false);
+}
+
 // ============================================================
 // DST zones with recurring (day-of-week) rules
 // ============================================================
