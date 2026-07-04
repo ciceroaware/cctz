@@ -2442,6 +2442,54 @@ TEST(CreateWinZoneInfoSource, LoneTransitionDate) {
   }
 }
 
+// Lone-date entries with a nonzero StandardBias.  Windows (the kernel,
+// SystemTimeToTzSpecificLocalTime, and .NET alike) ignores StandardBias for
+// any entry that never observes DST, so these behave as UTC+1 year-round,
+// exactly like a fixed-offset zone with a nonzero StandardBias.
+const WinTimeZoneRegistryInfo kLoneDaylightDateStandardBiasZone(
+    {
+        {-60, -30, -60, {0, 0, 0, 0, 0, 0, 0, 0}, {0, 3, 0, 5, 2, 0, 0, 0}},
+    },
+    0);
+
+const WinTimeZoneRegistryInfo kLoneStandardDateStandardBiasZone(
+    {
+        {-60, -30, -60, {0, 10, 0, 5, 3, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}},
+    },
+    0);
+
+TEST(ToTzString, LoneTransitionDateIgnoresStandardBias) {
+  EXPECT_EQ("<UTC+01>-1",
+            ToTzString(kLoneDaylightDateStandardBiasZone.entries.back()));
+  EXPECT_EQ("<UTC+01>-1",
+            ToTzString(kLoneStandardDateStandardBiasZone.entries.back()));
+}
+
+TEST(CreateWinZoneInfoSource, LoneTransitionDateIgnoresStandardBias) {
+  {
+    const auto source =
+        CreateWinZoneInfoSource(kLoneDaylightDateStandardBiasZone);
+    ASSERT_TRUE(!!source);
+    auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+    ASSERT_TRUE(!!tz);
+    ExpectTime(FromUTC(2024, 1, 15, 0, 0, 0), tz, 2024, 1, 15, 1, 0, 0,
+               3600, false);
+    ExpectTime(FromUTC(2024, 6, 15, 0, 0, 0), tz, 2024, 6, 15, 1, 0, 0,
+               3600, false);
+  }
+  {
+    const auto source =
+        CreateWinZoneInfoSource(kLoneStandardDateStandardBiasZone);
+    ASSERT_TRUE(!!source);
+    auto tz = TimeZoneInfo::MakeFromSourceForTesting(source.get());
+    ASSERT_TRUE(!!tz);
+    ExpectTime(FromUTC(2024, 1, 15, 0, 0, 0), tz, 2024, 1, 15, 1, 0, 0,
+               3600, false);
+    ExpectTime(FromUTC(2024, 6, 15, 0, 0, 0), tz, 2024, 6, 15, 1, 0, 0,
+               3600, false);
+  }
+}
+
 // ============================================================
 // DST zones with recurring (day-of-week) rules
 // ============================================================

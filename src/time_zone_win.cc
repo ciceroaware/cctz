@@ -114,14 +114,11 @@ class TransitionTableBuilder {
     if (!first_entry_supports_dst) {
       // The first entry never transitions (ProcessEntry ignores lone
       // transition dates), so add an initial transition here and seed
-      // last_offset_.  For fixed-offset zones (no transition dates at all),
-      // the Win32 API ignores StandardBias and uses only Bias.
+      // last_offset_.  For entries that never observe DST, the Win32 API
+      // ignores StandardBias and uses only Bias.
       civil_second first_civil_second(first_year, 1, 1, 0, 0, 0);
       TransitionInfo initial_info;
-      const std::int_fast32_t offset_seconds =
-          -60 * (IsFixedTimeZone(first_entry)
-                     ? first_entry.bias
-                     : (first_entry.bias + first_entry.standard_bias));
+      const std::int_fast32_t offset_seconds = -60 * first_entry.bias;
       initial_info.time =
           seconds(first_civil_second - offset_seconds -
                   civil_second(1970, 1, 1, 0, 0, 0))
@@ -235,12 +232,12 @@ class TransitionTableBuilder {
         TryAddOffset(year_begin, OffsetDstPair{
             -60 * (format.bias + format.daylight_bias), true});
       } else {
-        // For fixed-offset zones (no transition dates), the Win32 API ignores
-        // StandardBias and uses only Bias.  For DST zones, the standard-time
-        // offset is -(Bias + StandardBias).
+        // For entries that never observe DST (no transition dates, or only
+        // one of the two), the Win32 API ignores StandardBias and uses only
+        // Bias.  For DST zones, the standard-time offset is
+        // -(Bias + StandardBias).
         const std::int_fast32_t year_begin_bias =
-            IsFixedTimeZone(format) ? format.bias
-                                    : (format.bias + format.standard_bias);
+            supports_dst ? (format.bias + format.standard_bias) : format.bias;
         TryAddOffset(year_begin, OffsetDstPair{-60 * year_begin_bias, false});
       }
     }
@@ -350,10 +347,6 @@ class TransitionTableBuilder {
     transition.time = transition_info.time;
     transition.type_idx = static_cast<uint8_t>(type_index);
     transitions_.push_back(transition);
-  }
-
-  static bool IsFixedTimeZone(const WinTimeZoneRegistryEntry& entry) {
-    return entry.standard_date.month == 0 && entry.daylight_date.month == 0;
   }
 
   std::vector<Transition> transitions_;
@@ -599,21 +592,16 @@ std::string ToTzTransitionDateTimeStr(const WinSystemTime& datetime) {
 
 // Construct TZ String Extensions
 std::string ToTzStringImpl(const WinTimeZoneRegistryEntry& entry) {
-  if (entry.standard_date.month == 0 && entry.daylight_date.month == 0) {
-    // For fixed-offset zones (no transition dates), the Win32 API ignores
-    // StandardBias and uses only Bias.  The transition table follows the
-    // same rule, and the TZ string must agree with the table's last
-    // transition or TimeZoneInfo::Load() rejects the whole zone.
-    return ToTzAbbrAndOffset(cctz::seconds(60 * entry.bias));
-  }
   if (entry.standard_date.month == 0 || entry.daylight_date.month == 0) {
     // Windows requires both StandardDate and DaylightDate for a zone that
-    // observes DST; with only one date the entry never observes DST
-    // (TransitionTableBuilder::ProcessEntry applies the same rule).
-    // Emitting the DST offset with a single rule date would produce an
-    // unparseable TZ string and the zone would fail to load.
-    return ToTzAbbrAndOffset(
-        cctz::seconds(60 * (entry.bias + entry.standard_bias)));
+    // observes DST; with either date absent the entry never observes DST,
+    // and Windows (the kernel, SystemTimeToTzSpecificLocalTime, and .NET
+    // alike) then ignores StandardBias and uses only Bias.  The transition
+    // table follows the same rule
+    // (TransitionTableBuilder::ProcessEntry/Initialize), and the TZ string
+    // must agree with the table's last transition or TimeZoneInfo::Load()
+    // rejects the whole zone.
+    return ToTzAbbrAndOffset(cctz::seconds(60 * entry.bias));
   }
   const std::string std_tz =
       ToTzAbbrAndOffset(cctz::seconds(60 * (entry.bias + entry.standard_bias)));
