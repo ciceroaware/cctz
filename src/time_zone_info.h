@@ -64,6 +64,10 @@ class TimeZoneInfo : public TimeZoneIf {
   // Factories.
   static std::unique_ptr<TimeZoneInfo> UTC();  // never fails
   static std::unique_ptr<TimeZoneInfo> Make(const std::string& name);
+  // Loads directly from a caller-provided source, bypassing the
+  // zone_info_source_factory chain that Make() consults. For tests only.
+  static std::unique_ptr<TimeZoneInfo> MakeFromSourceForTesting(
+      ZoneInfoSource& source);
 
   // TimeZoneIf implementations.
   time_zone::absolute_lookup BreakTime(

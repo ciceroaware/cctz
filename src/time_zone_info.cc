@@ -61,6 +61,11 @@
 #include "time_zone_posix.h"
 #include "tzfile.h"
 
+#if defined(_WIN32) && defined(CCTZ_USE_WIN_REGISTRY_FALLBACK)
+#include "time_zone_win.h"
+#include "time_zone_win_loader.h"
+#endif
+
 namespace cctz {
 
 namespace {
@@ -496,6 +501,21 @@ class FileZoneInfoSource : public ZoneInfoSource {
   std::size_t len_;
 };
 
+std::string GetEnv(const char* name) {
+#if defined(_MSC_VER)
+  char* value = nullptr;
+  _dupenv_s(&value, nullptr, name);
+  if (value == nullptr) return std::string();
+  std::string result(value);
+  free(value);
+  return result;
+#else
+  const char* value = std::getenv(name);
+  if (value == nullptr) return std::string();
+  return std::string(value);
+#endif
+}
+
 std::unique_ptr<ZoneInfoSource> FileZoneInfoSource::Open(
     const std::string& name) {
   // Use of the "file:" prefix is intended for testing purposes only.
@@ -509,19 +529,16 @@ std::unique_ptr<ZoneInfoSource> FileZoneInfoSource::Open(
   // Map the time-zone name to a path name.
   std::string path;
   if (pos == name.size() || name[pos] != '/') {
-    const char* tzdir = "/usr/share/zoneinfo";
-    char* tzdir_env = nullptr;
-#if defined(_MSC_VER)
-    _dupenv_s(&tzdir_env, nullptr, "TZDIR");
-#else
-    tzdir_env = std::getenv("TZDIR");
+    const std::string tzdir = GetEnv("TZDIR");
+#if defined(_WIN32) && defined(CCTZ_USE_WIN_REGISTRY_FALLBACK)
+    // On Windows, skip probing the default zoneinfo directory when TZDIR is
+    // not set so that the Windows registry fallback is used instead.  When
+    // the fallback is not compiled in, keep the historical behavior of
+    // trying "/usr/share/zoneinfo" (resolved against the current drive).
+    if (tzdir.empty()) return nullptr;
 #endif
-    if (tzdir_env && *tzdir_env) tzdir = tzdir_env;
-    path += tzdir;
+    path += tzdir.empty() ? "/usr/share/zoneinfo" : tzdir;
     path += '/';
-#if defined(_MSC_VER)
-    free(tzdir_env);
-#endif
   }
   path.append(name, pos, std::string::npos);
 
@@ -940,6 +957,14 @@ bool TimeZoneInfo::Load(const std::string& name) {
   auto zip = cctz_extension::zone_info_source_factory(
       name, [](const std::string& n) -> std::unique_ptr<ZoneInfoSource> {
         if (auto z = FileZoneInfoSource::Open(n)) return z;
+#if defined(_WIN32) && defined(CCTZ_USE_WIN_REGISTRY_FALLBACK)
+        // The Android and Fuchsia sources below can never succeed on
+        // Windows, so their position relative to this fallback is
+        // immaterial.
+        if (auto z = CreateWinZoneInfoSource(LoadWinTimeZoneRegistry(n))) {
+          return z;
+        }
+#endif
         if (auto z = AndroidZoneInfoSource::Open(n)) return z;
         if (auto z = FuchsiaZoneInfoSource::Open(n)) return z;
         return nullptr;
@@ -956,6 +981,15 @@ std::unique_ptr<TimeZoneInfo> TimeZoneInfo::UTC() {
 std::unique_ptr<TimeZoneInfo> TimeZoneInfo::Make(const std::string& name) {
   auto tz = std::unique_ptr<TimeZoneInfo>(new TimeZoneInfo);
   if (!tz->Load(name)) tz.reset();  // fallback to UTC
+  return tz;
+}
+
+std::unique_ptr<TimeZoneInfo> TimeZoneInfo::MakeFromSourceForTesting(
+    ZoneInfoSource& source) {
+  auto tz = std::unique_ptr<TimeZoneInfo>(new TimeZoneInfo);
+  if (!tz->Load(&source)) {
+    return nullptr;
+  }
   return tz;
 }
 

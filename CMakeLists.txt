@@ -87,6 +87,10 @@ add_library(cctz
   src/zone_info_source.cc
   $<$<PLATFORM_ID:Windows>:src/time_zone_name_win.cc>
   $<$<PLATFORM_ID:Windows>:src/time_zone_name_win.h>
+  $<$<PLATFORM_ID:Windows>:src/time_zone_win.cc>
+  $<$<PLATFORM_ID:Windows>:src/time_zone_win.h>
+  $<$<PLATFORM_ID:Windows>:src/time_zone_win_loader.cc>
+  $<$<PLATFORM_ID:Windows>:src/time_zone_win_loader.h>
   ${CCTZ_HDRS}
   )
 cctz_target_set_cxx_standard(cctz)
@@ -99,6 +103,9 @@ set_target_properties(cctz PROPERTIES
   )
 if(APPLE)
   target_link_libraries(cctz PUBLIC ${CoreFoundation})
+endif()
+if(WIN32)
+  target_link_libraries(cctz PUBLIC advapi32.lib)
 endif()
 add_library(cctz::cctz ALIAS cctz)
 
@@ -172,6 +179,16 @@ if (BUILD_TESTING)
       )
     add_test(time_zone_name_win_test time_zone_name_win_test)
     list(APPEND CCTZ_TESTS time_zone_name_win_test)
+
+    add_executable(time_zone_win_test src/time_zone_win_test.cc)
+    cctz_target_set_cxx_standard(time_zone_win_test)
+    target_include_directories(time_zone_win_test PRIVATE ${GTEST_INCLUDE_DIRS})
+    target_link_libraries(time_zone_win_test
+      cctz::cctz
+      ${GTEST_BOTH_LIBRARIES}
+      ${CMAKE_THREAD_LIBS_INIT}
+      )
+    add_test(time_zone_win_test time_zone_win_test)
   endif()
 
   # tests runs on testdata
