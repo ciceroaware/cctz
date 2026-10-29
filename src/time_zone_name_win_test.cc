@@ -22,20 +22,42 @@
 #include "gtest/gtest.h"
 
 namespace cctz {
+namespace {
 
-TEST(TimeZoneNameWin, GetWindowsLocalTimeZone) {
-  // On Windows 10 1809+ (where icu.dll is available in System32),
-  // GetWindowsLocalTimeZone() should return a valid IANA time zone name.
-  // Note that LOAD_LIBRARY_SEARCH_SYSTEM32 is not sufficient to reliably load
-  // "icu.dll" in the production code, but it should be OK for testing purposes.
+// Returns whether "icu.dll" is available in System32 (Windows 10 1809+).
+// Call this only after the function under test, so that the DLL this loads
+// cannot affect it. Note that LOAD_LIBRARY_SEARCH_SYSTEM32 is not sufficient to
+// reliably load "icu.dll" in the production code, but it should be OK for
+// testing purposes.
+bool IsIcuDllAvailable() {
   HMODULE icu_dll =
       ::LoadLibraryExW(L"icu.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (icu_dll == nullptr) {
+    return false;
+  }
+  ::FreeLibrary(icu_dll);
+  return true;
+}
+
+}  // namespace
+
+TEST(TimeZoneNameWin, GetWindowsLocalTimeZone) {
+  // GetWindowsLocalTimeZone() should return a valid IANA time zone name where
+  // "icu.dll" is available.
   const std::string tz = GetWindowsLocalTimeZone();
-  if (icu_dll != nullptr) {
+  if (IsIcuDllAvailable()) {
     EXPECT_FALSE(tz.empty());
-    ::FreeLibrary(icu_dll);
   } else {
     EXPECT_TRUE(tz.empty());
+  }
+}
+
+TEST(TimeZoneNameWin, ConvertToWindowsTimeZoneId) {
+  const std::wstring id = ConvertToWindowsTimeZoneId("America/New_York");
+  if (IsIcuDllAvailable()) {
+    EXPECT_FALSE(id.empty());
+  } else {
+    EXPECT_TRUE(id.empty());
   }
 }
 
