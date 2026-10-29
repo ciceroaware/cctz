@@ -45,10 +45,9 @@ bool U_SUCCESS(UErrorCode error) { return error <= U_ZERO_ERROR; }
 using ucal_getTimeZoneIDForWindowsID_func = std::int32_t(__cdecl*)(
     const UChar* winid, std::int32_t len, const char* region, UChar* id,
     std::int32_t id_capacity, UErrorCode* status);
-
-std::atomic<bool> g_unavailable;
-std::atomic<ucal_getTimeZoneIDForWindowsID_func>
-    g_ucal_getTimeZoneIDForWindowsID;
+using ucal_getWindowsTimeZoneID_func =
+    std::int32_t(__cdecl*)(const UChar* id, std::int32_t len, UChar* winid,
+                           std::int32_t winid_capacity, UErrorCode* status);
 
 template <typename T> static T AsProcAddress(HMODULE module, const char* name) {
   static_assert(
@@ -73,54 +72,103 @@ std::wstring GetSystem32Dir() {
   return result;
 }
 
-ucal_getTimeZoneIDForWindowsID_func LoadIcuGetTimeZoneIDForWindowsID() {
-  // This function is intended to be lock free to avoid potential deadlocks
-  // with loader-lock taken inside LoadLibraryW. As LoadLibraryW and
-  // GetProcAddress are idempotent unless the DLL is unloaded, we just need to
-  // make sure global variables are read/written atomically, where
-  // memory_order_relaxed is also acceptable.
-
-  if (g_unavailable.load(std::memory_order_relaxed)) {
-    return nullptr;
-  }
-
-  {
-    const auto ucal_getTimeZoneIDForWindowsIDRef =
-        g_ucal_getTimeZoneIDForWindowsID.load(std::memory_order_relaxed);
-    if (ucal_getTimeZoneIDForWindowsIDRef != nullptr) {
-      return ucal_getTimeZoneIDForWindowsIDRef;
+struct IcuDll {
+  // Return the module handle of "icu.dll" in the System32 directory, or nullptr
+  // if it is not available.
+  //
+  // This method is intended to be lock free to avoid potential deadlocks with
+  // loader-lock taken inside LoadLibraryW. As LoadLibraryW and GetProcAddress
+  // are idempotent unless the DLL is unloaded, we just need to make sure the
+  // members are read/written atomically, where memory_order_relaxed is also
+  // acceptable.
+  HMODULE GetOrLoad() {
+    if (unavailable.load(std::memory_order_relaxed)) {
+      return nullptr;
     }
+
+    {
+      const HMODULE cached = dll.load(std::memory_order_relaxed);
+      if (cached != nullptr) {
+        return cached;
+      }
+    }
+
+    const std::wstring system32_dir = GetSystem32Dir();
+    if (system32_dir.empty()) {
+      unavailable.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+
+    // Here LoadLibraryExW(L"icu.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)
+    // does return the expected handle if "icu.dll" is already loaded from
+    // somewhere other than the system32 directory. Specifying the full path
+    // with LoadLibraryW ensures that the handle is from the system32 directory.
+    const std::wstring icu_dll_path = system32_dir + L"\\icu.dll";
+    const HMODULE icu_dll = ::LoadLibraryW(icu_dll_path.c_str());
+    if (icu_dll == nullptr) {
+      unavailable.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+
+    dll.store(icu_dll, std::memory_order_relaxed);
+    return icu_dll;
   }
 
-  const std::wstring system32_dir = GetSystem32Dir();
-  if (system32_dir.empty()) {
-    g_unavailable.store(true, std::memory_order_relaxed);
-    return nullptr;
+  std::atomic<bool> unavailable;
+  std::atomic<HMODULE> dll;
+};
+
+IcuDll g_icu_dll;
+
+template <typename T>
+struct IcuFunction {
+  // Returns the entry point for the given function name, or nullptr if it is
+  // not available; the result, successful or not, is cached.
+  //
+  // This method is intended to be lock free to avoid potential deadlocks with
+  // loader-lock taken inside LoadLibraryW and GetProcAddress.
+  T GetOrLoad(const char* name) {
+    if (unavailable.load(std::memory_order_relaxed)) {
+      return nullptr;
+    }
+
+    {
+      const T cached = func.load(std::memory_order_relaxed);
+      if (cached != nullptr) {
+        return cached;
+      }
+    }
+
+    const HMODULE icu_dll = g_icu_dll.GetOrLoad();
+    if (icu_dll == nullptr) {
+      unavailable.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+
+    const T resolved = AsProcAddress<T>(icu_dll, name);
+    if (resolved == nullptr) {
+      unavailable.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+    func.store(resolved, std::memory_order_relaxed);
+    return resolved;
   }
 
-  // Here LoadLibraryExW(L"icu.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32) does
-  // not work if "icu.dll" is already loaded from somewhere other than the
-  // system32 directory. Specifying the full path with LoadLibraryW is more
-  // reliable.
-  const std::wstring icu_dll_path = system32_dir + L"\\icu.dll";
-  const HMODULE icu_dll = ::LoadLibraryW(icu_dll_path.c_str());
-  if (icu_dll == nullptr) {
-    g_unavailable.store(true, std::memory_order_relaxed);
-    return nullptr;
-  }
+  std::atomic<bool> unavailable;
+  std::atomic<T> func;
+};
 
-  const auto ucal_getTimeZoneIDForWindowsIDRef =
-      AsProcAddress<ucal_getTimeZoneIDForWindowsID_func>(
-          icu_dll, "ucal_getTimeZoneIDForWindowsID");
-  if (ucal_getTimeZoneIDForWindowsIDRef == nullptr) {
-    g_unavailable.store(true, std::memory_order_relaxed);
-    return nullptr;
-  }
+IcuFunction<ucal_getTimeZoneIDForWindowsID_func>
+    g_ucal_getTimeZoneIDForWindowsID;
+IcuFunction<ucal_getWindowsTimeZoneID_func> g_ucal_getWindowsTimeZoneID;
 
-  g_ucal_getTimeZoneIDForWindowsID.store(ucal_getTimeZoneIDForWindowsIDRef,
-                                         std::memory_order_relaxed);
+ucal_getTimeZoneIDForWindowsID_func LoadIcuGetTimeZoneIDForWindowsID() {
+  return g_ucal_getTimeZoneIDForWindowsID.GetOrLoad(
+      "ucal_getTimeZoneIDForWindowsID");
+}
 
-  return ucal_getTimeZoneIDForWindowsIDRef;
+ucal_getWindowsTimeZoneID_func LoadIcuGetWindowsTimeZoneID() {
+  return g_ucal_getWindowsTimeZoneID.GetOrLoad("ucal_getWindowsTimeZoneID");
 }
 
 // Convert wchar_t array (UTF-16) to UTF-8 string
@@ -139,6 +187,26 @@ std::string Utf16ToUtf8(const wchar_t* ptr, size_t size) {
         static_cast<int>(len), nullptr, nullptr));
   } while (len > result.size());
   result.resize(len);
+  return result;
+}
+
+// Convert UTF-8 string to std::wstring (UTF-16), or the empty string on
+// failure.
+std::wstring Utf8ToUtf16(const std::string& str) {
+  if (str.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    return std::wstring();
+  }
+  const int str_len = static_cast<int>(str.size());
+  const int required = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                             str.data(), str_len, nullptr, 0);
+  if (required <= 0) {
+    return std::wstring();
+  }
+  std::wstring result(static_cast<std::size_t>(required), L'\0');
+  if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), str_len,
+                            &result[0], required) != required) {
+    return std::wstring();
+  }
   return result;
 }
 
@@ -171,6 +239,34 @@ std::string GetWindowsLocalTimeZone() {
       return std::string();
     }
   }
+}
+
+std::wstring ConvertToWindowsTimeZoneId(const std::string& iana_name) {
+  const auto getWindowsTimeZoneID = LoadIcuGetWindowsTimeZoneID();
+  if (getWindowsTimeZoneID == nullptr) {
+    return std::wstring();
+  }
+  const std::wstring id = Utf8ToUtf16(iana_name);
+  if (id.empty() || id.size() > std::numeric_limits<std::int32_t>::max()) {
+    return std::wstring();
+  }
+
+  // A Windows time zone ID names a registry key, so it fits in
+  // DYNAMIC_TIME_ZONE_INFORMATION::TimeZoneKeyName. A longer one, reported as
+  // U_BUFFER_OVERFLOW_ERROR, cannot be used and is treated as a failure.
+  const std::int32_t capacity = static_cast<std::int32_t>(
+      std::extent<
+          decltype(DYNAMIC_TIME_ZONE_INFORMATION::TimeZoneKeyName)>::value);
+  std::wstring result(static_cast<std::size_t>(capacity), L'\0');
+  UErrorCode status = U_ZERO_ERROR;
+  const std::int32_t len =
+      getWindowsTimeZoneID(id.c_str(), static_cast<std::int32_t>(id.size()),
+                           &result[0], capacity, &status);
+  if (!U_SUCCESS(status) || len < 0 || len > capacity) {
+    return std::wstring();
+  }
+  result.resize(static_cast<std::size_t>(len));
+  return result;
 }
 
 }  // namespace cctz
