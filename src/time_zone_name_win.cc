@@ -46,10 +46,6 @@ using ucal_getTimeZoneIDForWindowsID_func = std::int32_t(__cdecl*)(
     const UChar* winid, std::int32_t len, const char* region, UChar* id,
     std::int32_t id_capacity, UErrorCode* status);
 
-std::atomic<bool> g_unavailable;
-std::atomic<ucal_getTimeZoneIDForWindowsID_func>
-    g_ucal_getTimeZoneIDForWindowsID;
-
 template <typename T> static T AsProcAddress(HMODULE module, const char* name) {
   static_assert(
       std::is_pointer<T>::value &&
@@ -73,54 +69,112 @@ std::wstring GetSystem32Dir() {
   return result;
 }
 
-ucal_getTimeZoneIDForWindowsID_func LoadIcuGetTimeZoneIDForWindowsID() {
-  // This function is intended to be lock free to avoid potential deadlocks
-  // with loader-lock taken inside LoadLibraryW. As LoadLibraryW and
-  // GetProcAddress are idempotent unless the DLL is unloaded, we just need to
-  // make sure global variables are read/written atomically, where
-  // memory_order_relaxed is also acceptable.
+class IcuDll {
+ public:
+  // Use `constexpr` until we can use `constinit` for constant initialization.
+  constexpr IcuDll() : unavailable_(false), dll_(nullptr) {}
+  IcuDll(const IcuDll&) = delete;
+  IcuDll& operator=(const IcuDll&) = delete;
 
-  if (g_unavailable.load(std::memory_order_relaxed)) {
-    return nullptr;
-  }
-
-  {
-    const auto ucal_getTimeZoneIDForWindowsIDRef =
-        g_ucal_getTimeZoneIDForWindowsID.load(std::memory_order_relaxed);
-    if (ucal_getTimeZoneIDForWindowsIDRef != nullptr) {
-      return ucal_getTimeZoneIDForWindowsIDRef;
+  // Returns the module handle of "icu.dll" in the System32 directory, or
+  // nullptr if it is not available.
+  //
+  // This method is intended to be lock free to avoid potential deadlocks with
+  // loader-lock taken inside LoadLibraryW. As LoadLibraryW and GetProcAddress
+  // are idempotent unless the DLL is unloaded, we just need to make sure the
+  // members are read/written atomically, where memory_order_relaxed is also
+  // acceptable.
+  HMODULE GetOrLoad() {
+    if (unavailable_.load(std::memory_order_relaxed)) {
+      return nullptr;
     }
+
+    {
+      const HMODULE cached = dll_.load(std::memory_order_relaxed);
+      if (cached != nullptr) {
+        return cached;
+      }
+    }
+
+    const std::wstring system32_dir = GetSystem32Dir();
+    if (system32_dir.empty()) {
+      unavailable_.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+
+    // Here LoadLibraryExW(L"icu.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)
+    // does not return the expected handle if "icu.dll" is already loaded from
+    // somewhere other than the system32 directory. Specifying the full path
+    // with LoadLibraryW ensures that the handle is from the system32 directory.
+    const std::wstring icu_dll_path = system32_dir + L"\\icu.dll";
+    const HMODULE icu_dll = ::LoadLibraryW(icu_dll_path.c_str());
+    if (icu_dll == nullptr) {
+      unavailable_.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+
+    dll_.store(icu_dll, std::memory_order_relaxed);
+    return icu_dll;
   }
 
-  const std::wstring system32_dir = GetSystem32Dir();
-  if (system32_dir.empty()) {
-    g_unavailable.store(true, std::memory_order_relaxed);
-    return nullptr;
+ private:
+  std::atomic<bool> unavailable_;
+  std::atomic<HMODULE> dll_;
+};
+
+IcuDll g_icu_dll;
+
+template <typename T>
+class IcuFunction {
+ public:
+  // Use `constexpr` until we can use `constinit` for constant initialization.
+  constexpr IcuFunction() : unavailable_(false), func_(nullptr) {}
+  IcuFunction(const IcuFunction&) = delete;
+  IcuFunction& operator=(const IcuFunction&) = delete;
+
+  // Returns the entry point for the given function name, or nullptr if it is
+  // not available; the result, successful or not, is cached.
+  //
+  // This method is intended to be lock free to avoid potential deadlocks with
+  // loader-lock taken inside LoadLibraryW and GetProcAddress.
+  T GetOrLoad(const char* name) {
+    if (unavailable_.load(std::memory_order_relaxed)) {
+      return nullptr;
+    }
+
+    {
+      const T cached = func_.load(std::memory_order_relaxed);
+      if (cached != nullptr) {
+        return cached;
+      }
+    }
+
+    const HMODULE icu_dll = g_icu_dll.GetOrLoad();
+    if (icu_dll == nullptr) {
+      unavailable_.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+
+    const T resolved = AsProcAddress<T>(icu_dll, name);
+    if (resolved == nullptr) {
+      unavailable_.store(true, std::memory_order_relaxed);
+      return nullptr;
+    }
+    func_.store(resolved, std::memory_order_relaxed);
+    return resolved;
   }
 
-  // Here LoadLibraryExW(L"icu.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32) does
-  // not work if "icu.dll" is already loaded from somewhere other than the
-  // system32 directory. Specifying the full path with LoadLibraryW is more
-  // reliable.
-  const std::wstring icu_dll_path = system32_dir + L"\\icu.dll";
-  const HMODULE icu_dll = ::LoadLibraryW(icu_dll_path.c_str());
-  if (icu_dll == nullptr) {
-    g_unavailable.store(true, std::memory_order_relaxed);
-    return nullptr;
-  }
+ private:
+  std::atomic<bool> unavailable_;
+  std::atomic<T> func_;
+};
 
-  const auto ucal_getTimeZoneIDForWindowsIDRef =
-      AsProcAddress<ucal_getTimeZoneIDForWindowsID_func>(
-          icu_dll, "ucal_getTimeZoneIDForWindowsID");
-  if (ucal_getTimeZoneIDForWindowsIDRef == nullptr) {
-    g_unavailable.store(true, std::memory_order_relaxed);
-    return nullptr;
-  }
+IcuFunction<ucal_getTimeZoneIDForWindowsID_func>
+    g_ucal_getTimeZoneIDForWindowsID;
 
-  g_ucal_getTimeZoneIDForWindowsID.store(ucal_getTimeZoneIDForWindowsIDRef,
-                                         std::memory_order_relaxed);
-
-  return ucal_getTimeZoneIDForWindowsIDRef;
+ucal_getTimeZoneIDForWindowsID_func LoadIcuGetTimeZoneIDForWindowsID() {
+  return g_ucal_getTimeZoneIDForWindowsID.GetOrLoad(
+      "ucal_getTimeZoneIDForWindowsID");
 }
 
 // Convert wchar_t array (UTF-16) to UTF-8 string
