@@ -58,6 +58,8 @@ cc_library(
         "src/time_zone_posix.h",
         "src/tzfile.h",
         "src/zone_info_source.cc",
+        "src/zone_info_source_win.cc",  # Platform-independent
+        "src/zone_info_source_win.h",  # Platform-independent
     ] + select({
         "@platforms//os:windows": [
             "src/time_zone_name_win.cc",
@@ -168,6 +170,23 @@ cc_test(
     srcs = [
         "src/time_zone_posix.h",
         "src/time_zone_posix_test.cc",
+    ],
+    deps = [
+        ":civil_time",
+        ":time_zone",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "zone_info_source_win_test",
+    size = "small",
+    srcs = [
+        "src/time_zone_if.h",
+        "src/tzfile.h",
+        "src/zone_info_source_win.h",
+        "src/zone_info_source_win_test.cc",
     ],
     deps = [
         ":civil_time",

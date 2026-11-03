@@ -85,6 +85,8 @@ add_library(cctz
   src/time_zone_posix.h
   src/tzfile.h
   src/zone_info_source.cc
+  src/zone_info_source_win.cc
+  src/zone_info_source_win.h
   $<$<PLATFORM_ID:Windows>:src/time_zone_name_win.cc>
   $<$<PLATFORM_ID:Windows>:src/time_zone_name_win.h>
   ${CCTZ_HDRS}
@@ -160,6 +162,16 @@ if (BUILD_TESTING)
     )
   add_test(time_zone_posix_test time_zone_posix_test)
   list(APPEND CCTZ_TESTS time_zone_posix_test)
+
+  add_executable(zone_info_source_win_test src/zone_info_source_win_test.cc)
+  cctz_target_set_cxx_standard(zone_info_source_win_test)
+  target_include_directories(zone_info_source_win_test PRIVATE ${GTEST_INCLUDE_DIRS})
+  target_link_libraries(zone_info_source_win_test
+    cctz::cctz
+    ${GTEST_BOTH_LIBRARIES}
+    ${CMAKE_THREAD_LIBS_INIT}
+    )
+  add_test(zone_info_source_win_test zone_info_source_win_test)
 
   if(WIN32)
     add_executable(time_zone_name_win_test src/time_zone_name_win_test.cc)
