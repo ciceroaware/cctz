@@ -51,4 +51,13 @@ TEST(TimeZoneNameWin, GetWindowsLocalTimeZone) {
   }
 }
 
+TEST(TimeZoneNameWin, ConvertToWindowsTimeZoneId) {
+  const std::wstring id = ConvertToWindowsTimeZoneId("America/New_York");
+  if (IsIcuDllAvailable()) {
+    EXPECT_FALSE(id.empty());
+  } else {
+    EXPECT_TRUE(id.empty());
+  }
+}
+
 } // namespace cctz

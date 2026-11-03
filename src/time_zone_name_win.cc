@@ -45,6 +45,9 @@ bool U_SUCCESS(UErrorCode error) { return error <= U_ZERO_ERROR; }
 using ucal_getTimeZoneIDForWindowsID_func = std::int32_t(__cdecl*)(
     const UChar* winid, std::int32_t len, const char* region, UChar* id,
     std::int32_t id_capacity, UErrorCode* status);
+using ucal_getWindowsTimeZoneID_func =
+    std::int32_t(__cdecl*)(const UChar* id, std::int32_t len, UChar* winid,
+                           std::int32_t winid_capacity, UErrorCode* status);
 
 template <typename T> static T AsProcAddress(HMODULE module, const char* name) {
   static_assert(
@@ -171,10 +174,15 @@ class IcuFunction {
 
 IcuFunction<ucal_getTimeZoneIDForWindowsID_func>
     g_ucal_getTimeZoneIDForWindowsID;
+IcuFunction<ucal_getWindowsTimeZoneID_func> g_ucal_getWindowsTimeZoneID;
 
 ucal_getTimeZoneIDForWindowsID_func LoadIcuGetTimeZoneIDForWindowsID() {
   return g_ucal_getTimeZoneIDForWindowsID.GetOrLoad(
       "ucal_getTimeZoneIDForWindowsID");
+}
+
+ucal_getWindowsTimeZoneID_func LoadIcuGetWindowsTimeZoneID() {
+  return g_ucal_getWindowsTimeZoneID.GetOrLoad("ucal_getWindowsTimeZoneID");
 }
 
 // Convert wchar_t array (UTF-16) to UTF-8 string
@@ -193,6 +201,26 @@ std::string Utf16ToUtf8(const wchar_t* ptr, size_t size) {
         static_cast<int>(len), nullptr, nullptr));
   } while (len > result.size());
   result.resize(len);
+  return result;
+}
+
+// Convert UTF-8 string to std::wstring (UTF-16), or the empty string on
+// failure.
+std::wstring Utf8ToUtf16(const std::string& str) {
+  if (str.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    return std::wstring();
+  }
+  const int str_len = static_cast<int>(str.size());
+  const int required = ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                             str.data(), str_len, nullptr, 0);
+  if (required <= 0) {
+    return std::wstring();
+  }
+  std::wstring result(static_cast<std::size_t>(required), L'\0');
+  if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str.data(), str_len,
+                            &result[0], required) != required) {
+    return std::wstring();
+  }
   return result;
 }
 
@@ -225,6 +253,34 @@ std::string GetWindowsLocalTimeZone() {
       return std::string();
     }
   }
+}
+
+std::wstring ConvertToWindowsTimeZoneId(const std::string& iana_name) {
+  const auto getWindowsTimeZoneID = LoadIcuGetWindowsTimeZoneID();
+  if (getWindowsTimeZoneID == nullptr) {
+    return std::wstring();
+  }
+  const std::wstring id = Utf8ToUtf16(iana_name);
+  if (id.empty() || id.size() > std::numeric_limits<std::int32_t>::max()) {
+    return std::wstring();
+  }
+
+  // A Windows time zone ID names a registry key, so it fits in
+  // DYNAMIC_TIME_ZONE_INFORMATION::TimeZoneKeyName. A longer one, reported as
+  // U_BUFFER_OVERFLOW_ERROR, cannot be used and is treated as a failure.
+  const std::int32_t capacity = static_cast<std::int32_t>(
+      std::extent<
+          decltype(DYNAMIC_TIME_ZONE_INFORMATION::TimeZoneKeyName)>::value);
+  std::wstring result(static_cast<std::size_t>(capacity), L'\0');
+  UErrorCode status = U_ZERO_ERROR;
+  const std::int32_t len =
+      getWindowsTimeZoneID(id.c_str(), static_cast<std::int32_t>(id.size()),
+                           &result[0], capacity, &status);
+  if (!U_SUCCESS(status) || len < 0 || len > capacity) {
+    return std::wstring();
+  }
+  result.resize(static_cast<std::size_t>(len));
+  return result;
 }
 
 }  // namespace cctz
